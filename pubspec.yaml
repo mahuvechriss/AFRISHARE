@@ -1,0 +1,88 @@
+name: afrishare
+description: "AfriShare – Offline Community File Sharing System. Share files, educational content, and community resources between nearby devices without internet."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # State Management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # Local Database
+  sqflite: ^2.4.1
+  path_provider: ^2.1.5
+  path: ^1.9.1
+
+  # Nearby Connectivity
+  nearby_connections: ^4.3.0
+  connectivity_plus: ^6.1.1
+  network_info_plus: ^6.1.4
+
+  # Encryption
+  encrypt: ^5.0.3
+  cryptography: ^2.7.0
+  crypto: ^3.0.6
+
+  # File Handling
+  file_picker: ^8.1.7
+  open_file: ^3.5.10
+  mime: ^2.0.0
+
+  # QR Code
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^6.0.2
+
+  # Permissions
+  permission_handler: ^11.3.1
+
+  # UI & Animations
+  google_fonts: ^6.2.1
+  shimmer: ^3.0.0
+  flutter_animate: ^4.5.2
+  cached_network_image: ^3.4.1
+  lottie: ^3.3.1
+  fl_chart: ^0.70.2
+  badges: ^3.1.2
+  flutter_slidable: ^3.1.1
+  image_picker: ^1.1.2
+
+  # Notifications
+  flutter_local_notifications: ^18.0.1
+
+  # Utilities
+  intl: ^0.20.2
+  uuid: ^4.5.1
+  url_launcher: ^6.3.1
+  share_plus: ^10.1.4
+  collection: ^1.19.1
+  equatable: ^2.0.7
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+  logger: ^2.5.0
+  sqflite_common_ffi_web: ^1.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.14
+  freezed: ^2.5.8
+  json_serializable: ^6.9.4
+  riverpod_generator: ^2.6.3
+  mockito: ^5.4.6
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/animations/
