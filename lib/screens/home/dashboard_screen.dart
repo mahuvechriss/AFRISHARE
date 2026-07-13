@@ -1,14 +1,20 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/file_utils.dart';
+import '../../models/transfer_model.dart';
 import '../../providers/transfer_provider.dart';
 import '../send/send_screen.dart';
 import '../receive/receive_screen.dart';
 import '../downloads/download_center_screen.dart';
+import '../library/community_library_screen.dart';
+import '../chat/chat_list_screen.dart';
 
 class DashboardScreen extends ConsumerWidget {
-  const DashboardScreen({super.key});
+  final VoidCallback? onNavigateToTransfers;
+
+  const DashboardScreen({super.key, this.onNavigateToTransfers});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -25,6 +31,7 @@ class DashboardScreen extends ConsumerWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
+              decoration: TextDecoration.none,
               color: Theme.of(context).brightness == Brightness.dark
                   ? Colors.white
                   : Colors.black87,
@@ -42,9 +49,7 @@ class DashboardScreen extends ConsumerWidget {
                   gradient: AppColors.greenGradient,
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => const SendScreen(),
-                    ),
+                    MaterialPageRoute(builder: (context) => const SendScreen()),
                   ),
                 ),
               ),
@@ -68,6 +73,15 @@ class DashboardScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 20),
 
+          // Active Transfer Cycle Indicator
+          if (transferState.activeTransfers.isNotEmpty)
+            _TransferCycleIndicator(
+              activeCount: transferState.activeTransfers.length,
+              totalFiles: transferState.transfers.length,
+              onTap: onNavigateToTransfers ?? () {},
+            ),
+          const SizedBox(height: 8),
+
           // Transfer Stats Card
           Container(
             padding: const EdgeInsets.all(20),
@@ -87,10 +101,7 @@ class DashboardScreen extends ConsumerWidget {
               children: [
                 const Text(
                   'Recent Transfers',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 16),
                 Row(
@@ -130,10 +141,7 @@ class DashboardScreen extends ConsumerWidget {
           // Features Grid
           const Text(
             'Features',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
           Row(
@@ -145,7 +153,17 @@ class DashboardScreen extends ConsumerWidget {
                   subtitle: 'Browse shared resources',
                   color: Colors.orange,
                   onTap: () {
-                    // Navigate to library
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => Scaffold(
+                          appBar: AppBar(
+                            title: const Text('Community Library'),
+                          ),
+                          body: const CommunityLibraryScreen(),
+                        ),
+                      ),
+                    );
                   },
                 ),
               ),
@@ -160,8 +178,7 @@ class DashboardScreen extends ConsumerWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) =>
-                            const _PlaceholderPage(title: 'Offline Chat'),
+                        builder: (context) => const ChatListScreen(),
                       ),
                     );
                   },
@@ -216,14 +233,21 @@ class DashboardScreen extends ConsumerWidget {
             children: [
               const Text(
                 'Recent Transfers',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               ),
-              TextButton(
-                onPressed: () {},
-                child: const Text('View All'),
+              GestureDetector(
+                onTap: onNavigateToTransfers ?? () {},
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  child: Text(
+                    'View All',
+                    style: TextStyle(
+                      color: AppColors.primaryGreen,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
@@ -237,14 +261,15 @@ class DashboardScreen extends ConsumerWidget {
                     Icon(
                       Icons.cloud_off,
                       size: 48,
-                      color: Colors.grey.shade400,
+                      color: Colors.grey.shade300,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                     Text(
-                      'No transfers yet',
+                      'Nothing yet',
                       style: TextStyle(
                         color: Colors.grey.shade500,
-                        fontSize: 14,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -252,7 +277,7 @@ class DashboardScreen extends ConsumerWidget {
                       'Send or receive files to get started',
                       style: TextStyle(
                         color: Colors.grey.shade400,
-                        fontSize: 12,
+                        fontSize: 13,
                       ),
                     ),
                   ],
@@ -260,49 +285,73 @@ class DashboardScreen extends ConsumerWidget {
               ),
             )
           else
-            ...transferState.transfers.take(3).map((transfer) => Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.primaryGreenSurface,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        transfer.direction.name == 'sent'                          ? Icons.upload_file
-                        : Icons.download,
-                        color: AppColors.primaryGreen,
-                        size: 24,
-                      ),
-                    ),
-                    title: Text(
-                      transfer.fileName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w500,
-                        fontSize: 14,
+            ...transferState.transfers
+                .take(3)
+                .map(
+                  (transfer) => Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      side: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.grey.shade800
+                            : Colors.grey.shade200,
+                        width: 1,
                       ),
                     ),
-                    subtitle: Text(
-                      '${FileUtils.formatFileSize(transfer.fileSize)} • ${transfer.statusText}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 4,
                       ),
-                    ),
-                    trailing: transfer.status.name == 'completed'
-                        ? const Icon(Icons.check_circle,
-                            color: AppColors.success, size: 22)
-                        : Text(
-                            '${transfer.progress.toStringAsFixed(0)}%',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                              color: AppColors.transferProgress,
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryGreenSurface,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          transfer.direction.name == 'sent'
+                              ? Icons.upload_file
+                              : Icons.download,
+                          color: AppColors.primaryGreen,
+                          size: 22,
+                        ),
+                      ),
+                      title: Text(
+                        transfer.fileName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '${FileUtils.formatFileSize(transfer.fileSize)} · ${transfer.statusText}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
+                      trailing: transfer.status == TransferStatus.completed
+                          ? const Icon(
+                              Icons.check_circle,
+                              color: AppColors.success,
+                              size: 22,
+                            )
+                          : Text(
+                              '${transfer.progress.toStringAsFixed(0)}%',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: AppColors.primaryBlueLight,
+                              ),
                             ),
-                          ),
+                    ),
                   ),
-                )),
+                ),
         ],
       ),
     );
@@ -324,7 +373,8 @@ class _QuickActionCard extends StatelessWidget {
     required this.color,
     required this.gradient,
     this.onTap,
-  });  @override
+  });
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
@@ -405,10 +455,7 @@ class _StatItem extends StatelessWidget {
         ),
         Text(
           label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey.shade600,
-          ),
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
         ),
       ],
     );
@@ -467,9 +514,142 @@ class _FeatureCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               subtitle,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade500,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TransferCycleIndicator extends StatefulWidget {
+  final int activeCount;
+  final int totalFiles;
+  final VoidCallback? onTap;
+
+  const _TransferCycleIndicator({
+    required this.activeCount,
+    required this.totalFiles,
+    this.onTap,
+  });
+
+  @override
+  State<_TransferCycleIndicator> createState() =>
+      _TransferCycleIndicatorState();
+}
+
+class _TransferCycleIndicatorState extends State<_TransferCycleIndicator>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [
+              AppColors.primaryGreenSurface,
+              AppColors.primaryBlueSurface,
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) {
+                return Transform.rotate(
+                  angle: _controller.value * 2 * math.pi,
+                  child: child,
+                );
+              },
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.primaryGreen.withValues(alpha: 0.15),
+                ),
+                child: Center(
+                  child: Text(
+                    '${widget.activeCount}',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primaryGreen,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.activeCount == 1
+                        ? '1 file transferring'
+                        : '${widget.activeCount} files transferring',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Total: ${widget.totalFiles} transfers',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.primaryGreen,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'View',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                  SizedBox(width: 4),
+                  Icon(Icons.arrow_forward_ios, color: Colors.white, size: 12),
+                ],
               ),
             ),
           ],
@@ -491,10 +671,7 @@ class _PlaceholderPage extends StatelessWidget {
         child: Text(
           '$title screen\nComing soon',
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 18,
-            color: Colors.grey.shade500,
-          ),
+          style: TextStyle(fontSize: 18, color: Colors.grey.shade500),
         ),
       ),
     );

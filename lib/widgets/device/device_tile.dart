@@ -79,6 +79,7 @@ class DeviceTile extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                         fontSize: 15,
                       ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 3),
                     Row(
@@ -100,12 +101,17 @@ class DeviceTile extends StatelessWidget {
                             color: _getStatusColor(),
                           ),
                         ),
-                        if (device.signalStrength > 0) ...[
-                          const SizedBox(width: 12),
-                          Icon(
-                            Icons.wifi,
-                            size: 13,
-                            color: Colors.grey.shade500,
+                        if (device.ipAddress != null) ...[
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              device.ipAddress!,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey.shade400,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                       ],

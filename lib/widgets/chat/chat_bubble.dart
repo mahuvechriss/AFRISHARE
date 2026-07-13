@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../models/chat_message_model.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/file_utils.dart';
@@ -7,92 +8,134 @@ import '../../core/utils/file_utils.dart';
 class ChatBubble extends StatelessWidget {
   final ChatMessageModel message;
   final bool isSentByMe;
+  final void Function(ChatMessageModel message)? onDelete;
 
   const ChatBubble({
     super.key,
     required this.message,
     this.isSentByMe = false,
+    this.onDelete,
   });
+
+  void _showContextMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (message.messageType == MessageType.text ||
+                message.messageType == MessageType.emoji)
+              ListTile(
+                leading: const Icon(Icons.copy, color: AppColors.primaryGreen),
+                title: const Text('Copy'),
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: message.message ?? ''));
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Message copied'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: AppColors.error),
+              title: const Text(
+                'Delete',
+                style: TextStyle(color: AppColors.error),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                onDelete?.call(message);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Align(
       alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        margin: EdgeInsets.only(
-          left: isSentByMe ? 60 : 16,
-          right: isSentByMe ? 16 : 60,
-          top: 4,
-          bottom: 4,
-        ),
-        child: Column(
-          crossAxisAlignment:
-              isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            if (message.senderName != null && !isSentByMe) ...[
-              Padding(
-                padding: const EdgeInsets.only(left: 12, bottom: 2),
-                child: Text(
-                  message.senderName!,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.primaryGreen,
+      child: GestureDetector(
+        onLongPress: () => _showContextMenu(context),
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.75,
+          ),
+          margin: EdgeInsets.only(
+            left: isSentByMe ? 60 : 16,
+            right: isSentByMe ? 16 : 60,
+            top: 4,
+            bottom: 4,
+          ),
+          child: Column(
+            crossAxisAlignment: isSentByMe
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            children: [
+              if (message.senderName != null && !isSentByMe) ...[
+                Padding(
+                  padding: const EdgeInsets.only(left: 12, bottom: 2),
+                  child: Text(
+                    message.senderName!,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.primaryGreen,
+                    ),
                   ),
+                ),
+              ],
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: isSentByMe
+                      ? AppColors.primaryGreen
+                      : Colors.grey.shade200,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(16),
+                    topRight: const Radius.circular(16),
+                    bottomLeft: Radius.circular(isSentByMe ? 16 : 4),
+                    bottomRight: Radius.circular(isSentByMe ? 4 : 16),
+                  ),
+                ),
+                child: _buildContent(),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 2, left: 4, right: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      FileUtils.formatChatDate(message.createdAt),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                    if (isSentByMe) ...[
+                      const SizedBox(width: 4),
+                      Icon(
+                        message.isRead ? Icons.done_all : Icons.done,
+                        size: 14,
+                        color: message.isRead
+                            ? AppColors.primaryBlue
+                            : Colors.grey.shade500,
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 10,
-              ),
-              decoration: BoxDecoration(
-                color: isSentByMe
-                    ? AppColors.primaryGreen
-                    : Colors.grey.shade200,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(
-                    isSentByMe ? 16 : 4,
-                  ),
-                  bottomRight: Radius.circular(
-                    isSentByMe ? 4 : 16,
-                  ),
-                ),
-              ),
-              child: _buildContent(),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(top: 2, left: 4, right: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    FileUtils.formatChatDate(message.createdAt),
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey.shade500,
-                    ),
-                  ),
-                  if (isSentByMe) ...[
-                    const SizedBox(width: 4),
-                    Icon(
-                      message.isRead ? Icons.done_all : Icons.done,
-                      size: 14,
-                      color: message.isRead
-                          ? AppColors.primaryBlue
-                          : Colors.grey.shade500,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

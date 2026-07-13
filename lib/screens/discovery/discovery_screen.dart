@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../core/theme/app_colors.dart';
 import '../../providers/discovery_provider.dart';
-import '../../services/qr_service.dart';
-import '../../services/auth_service.dart';
+import '../../services/nearby_connector.dart';
 import '../../widgets/device/device_tile.dart';
 import '../../widgets/common/empty_state.dart';
 
@@ -15,13 +15,11 @@ class DiscoveryScreen extends ConsumerStatefulWidget {
 }
 
 class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
-  final QRService _qrService = QRService.instance;
-  bool _showQRCode = false;
+  final NearbyConnector _connector = NearbyConnector.instance;
 
   @override
   void initState() {
     super.initState();
-    // Auto-start discovery
     Future.microtask(() {
       ref.read(discoveryStateProvider.notifier).startDiscovery();
     });
@@ -35,17 +33,29 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
     return Scaffold(
       body: Column(
         children: [
-          // QR Code Section
-          if (_showQRCode) _buildQRCodeSection(),
-
-          // Discovery Controls
+          _buildConnectionGuideCard(isDark),
           DeviceDiscoveryCard(
             isDiscovering: discoveryState.isDiscovering,
             deviceCount: discoveryState.devices.length,
-            onToggle: () {
+            onToggle: () async {
               if (discoveryState.isDiscovering) {
                 ref.read(discoveryStateProvider.notifier).stopDiscovery();
               } else {
+                final messenger = ScaffoldMessenger.of(context);
+                final location = await Permission.locationWhenInUse.request();
+                if (!location.isGranted) {
+                  if (mounted) {
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: const Text('Location permission is required to discover nearby devices'),
+                        backgroundColor: AppColors.error,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    );
+                  }
+                  return;
+                }
                 ref.read(discoveryStateProvider.notifier).startDiscovery();
               }
             },
@@ -53,44 +63,6 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
               ref.read(discoveryStateProvider.notifier).searchDevices();
             },
           ),
-
-          // QR Code Toggle
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () => setState(() => _showQRCode = !_showQRCode),
-                  icon: Icon(
-                    _showQRCode ? Icons.close : Icons.qr_code_scanner,
-                    size: 20,
-                  ),
-                  label: Text(_showQRCode ? 'Hide QR' : 'QR Pairing'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: () => _showScanner(),
-                  icon: const Icon(Icons.camera_alt_outlined, size: 20),
-                  label: const Text('Scan QR'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          // Device List Header
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
@@ -106,17 +78,12 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                 ),
                 Text(
                   '${discoveryState.devices.length} found',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.grey.shade500,
-                  ),
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 8),
-
-          // Device List
           Expanded(
             child: discoveryState.devices.isEmpty
                 ? const EmptyStateWidget(
@@ -145,89 +112,127 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
     );
   }
 
-  Widget _buildQRCodeSection() {
-    final authService = AuthService.instance;
-    final qrData = _qrService.generatePairingData(
-      authService.deviceId,
-      authService.currentUser?.deviceName ?? 'My Device',
-    );
-
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          const Text(
-            'Share this QR code',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 16,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Ask the other device to scan this code',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade500,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Center(
-            child: _qrService.generateQRWidget(
-              data: qrData,
-              size: 200,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            authService.currentUser?.deviceName ?? 'My Device',
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-              color: AppColors.primaryGreen,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showScanner() {
-    // In a real app, this would open the mobile_scanner
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('QR Scanner ready'),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-      ),
-    );
-  }
-
   void _connectToDevice(String deviceId) {
+    if (!mounted) return;
     ref.read(discoveryStateProvider.notifier).pairDevice(deviceId);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Text('Connecting to device...'),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
+    );
+  }
+
+  Widget _buildConnectionGuideCard(bool isDark) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppColors.primaryGreen, AppColors.primaryBlue],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isDark ? Colors.grey.shade700 : Colors.white24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.wifi_rounded, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Connect & Share',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade400,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_circle, size: 14, color: Colors.white),
+                    SizedBox(width: 4),
+                    Text('Active', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildStep(1, 'Both devices must be on the same WiFi network', isDark),
+          const SizedBox(height: 6),
+          _buildStep(2, 'Keep this tab open — devices auto-discover each other', isDark),
+          const SizedBox(height: 6),
+          _buildStep(3, 'Or open Send tab, pick files, and tap a device to send', isDark),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Your IP', style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.7))),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    const Icon(Icons.wifi, size: 14, color: Colors.white),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        _connector.localIp ?? 'Not connected',
+                        style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStep(int step, String text, bool isDark) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.3),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Center(
+            child: Text('$step', style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(text, style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.9), height: 1.3)),
+        ),
+      ],
     );
   }
 }

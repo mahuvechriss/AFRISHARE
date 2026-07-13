@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/constants/app_constants.dart';
 import '../../providers/chat_provider.dart';
-import '../../providers/auth_provider.dart';
+import '../../providers/discovery_provider.dart';
+import '../../models/device_model.dart';
+import '../../services/auth_service.dart';
+import '../../services/call_service.dart';
+import '../../services/contact_service.dart';
 import '../../widgets/chat/chat_bubble.dart';
 import '../../widgets/common/empty_state.dart';
+import '../../widgets/common/profile_avatar.dart';
+import '../call/call_screen.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String otherUserId;
@@ -23,14 +30,15 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  String? _nickname;
 
   @override
   void initState() {
     super.initState();
-    Future.microtask(() {
-      ref
-          .read(chatStateProvider.notifier)
-          .loadConversation(widget.otherUserId);
+    Future.microtask(() async {
+      ref.read(chatStateProvider.notifier).loadConversation(widget.otherUserId);
+      _nickname = await ContactService.instance.getNickname(widget.otherUserId);
+      if (mounted) setState(() {});
     });
   }
 
@@ -41,11 +49,90 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.dispose();
   }
 
+  String get _displayName => _nickname ?? widget.otherUserName;
+
+  void _editNickname() {
+    final controller = TextEditingController(text: _nickname ?? '');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Nickname'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'Enter a local nickname',
+            prefixIcon: Icon(Icons.edit),
+          ),
+          textCapitalization: TextCapitalization.words,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (_nickname != null) {
+                ContactService.instance.removeNickname(widget.otherUserId);
+                setState(() => _nickname = null);
+              }
+            },
+            child: Text(
+              'Remove',
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) {
+                ContactService.instance.setNickname(widget.otherUserId, name);
+                setState(() => _nickname = name);
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmClearChat() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear Chat'),
+        content: const Text(
+          'Delete all messages in this conversation? This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref
+                  .read(chatStateProvider.notifier)
+                  .clearConversation(widget.otherUserId);
+            },
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text(
+              'Clear',
+              style: TextStyle(color: AppColors.error),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _sendMessage() {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
-    ref.read(chatStateProvider.notifier).sendMessage(
+    ref
+        .read(chatStateProvider.notifier)
+        .sendMessage(
           receiverId: widget.otherUserId,
           receiverName: widget.otherUserName,
           message: text,
@@ -70,71 +157,185 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatStateProvider);
-    final authState = ref.watch(authStateProvider);
-    final currentUserId = authState.user?.id ?? '';
+    final discoveryState = ref.watch(discoveryStateProvider);
+    final currentUserId = AuthService.instance.currentUser?.deviceId ?? '';
+    final otherDevice = discoveryState.devices
+        .where((d) => d.deviceId == widget.otherUserId)
+        .cast<DeviceModel?>()
+        .firstOrNull;
 
     return Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
-            CircleAvatar(
+            ProfileAvatar(
+              deviceId: widget.otherUserId,
+              name: _displayName,
               radius: 16,
-              backgroundColor: AppColors.primaryGreenSurface,
-              child: Text(
-                widget.otherUserName[0].toUpperCase(),
-                style: const TextStyle(
-                  color: AppColors.primaryGreen,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              fontSize: 14,
+              ipAddress: otherDevice?.ipAddress,
+              port: otherDevice?.port ?? AppConstants.discoveryPort,
             ),
             const SizedBox(width: 10),
-            Text(
-              widget.otherUserName,
-              style: const TextStyle(fontSize: 17),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _displayName,
+                    style: const TextStyle(fontSize: 17),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (_nickname != null && _nickname != widget.otherUserName)
+                    Text(
+                      widget.otherUserName,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade500,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
             ),
           ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.attach_file),
+            icon: const Icon(Icons.call),
             onPressed: () {
-              // Pick and send file
+              CallService.instance.startCall(
+                remoteId: widget.otherUserId,
+                remoteName: widget.otherUserName,
+                video: false,
+              );
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const CallScreen()),
+              );
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.videocam),
+            onPressed: () {
+              CallService.instance.startCall(
+                remoteId: widget.otherUserId,
+                remoteName: widget.otherUserName,
+                video: true,
+              );
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const CallScreen()),
+              );
+            },
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'clear') {
+                _confirmClearChat();
+              } else if (value == 'nickname') {
+                _editNickname();
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'nickname',
+                child: Row(
+                  children: [
+                    Icon(Icons.edit, color: AppColors.primaryGreen, size: 20),
+                    SizedBox(width: 8),
+                    Text('Edit Nickname'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'clear',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_sweep, color: AppColors.error, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Clear Chat',
+                      style: TextStyle(color: AppColors.error),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
       body: Column(
         children: [
+          // Error banner
+          if (chatState.error != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              color: AppColors.error.withValues(alpha: 0.1),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    color: AppColors.error,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      chatState.error!,
+                      style: const TextStyle(
+                        color: AppColors.error,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.close,
+                      color: AppColors.error,
+                      size: 16,
+                    ),
+                    onPressed: () =>
+                        ref.read(chatStateProvider.notifier).clearError(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+            ),
           // Messages List
           Expanded(
             child: chatState.isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : chatState.messages.isEmpty
-                    ? const EmptyStateWidget(
-                        icon: Icons.chat_bubble_outline_rounded,
-                        title: 'No messages yet',
-                        subtitle:
-                            'Say hello to start the conversation',
-                      )
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 4,
-                        ),
-                        itemCount: chatState.messages.length,
-                        itemBuilder: (context, index) {
-                          final message = chatState.messages[index];
-                          final isSentByMe =
-                              message.senderId == currentUserId;
-                          return ChatBubble(
-                            message: message,
-                            isSentByMe: isSentByMe,
-                          );
+                ? const EmptyStateWidget(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    title: 'No messages yet',
+                    subtitle: 'Say hello to start the conversation',
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 8,
+                      horizontal: 4,
+                    ),
+                    itemCount: chatState.messages.length,
+                    itemBuilder: (context, index) {
+                      final message = chatState.messages[index];
+                      final isSentByMe = message.senderId == currentUserId;
+                      return ChatBubble(
+                        message: message,
+                        isSentByMe: isSentByMe,
+                        onDelete: (msg) {
+                          ref
+                              .read(chatStateProvider.notifier)
+                              .deleteMessage(msg.id);
                         },
-                      ),
+                      );
+                    },
+                  ),
           ),
 
           // Message Input
@@ -169,10 +370,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     decoration: InputDecoration(
                       hintText: 'Type a message...',
                       filled: true,
-                      fillColor:
-                          Theme.of(context).brightness == Brightness.dark
-                              ? AppColors.cardDark
-                              : AppColors.backgroundLight,
+                      fillColor: Theme.of(context).brightness == Brightness.dark
+                          ? AppColors.cardDark
+                          : AppColors.backgroundLight,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                         borderSide: BorderSide.none,

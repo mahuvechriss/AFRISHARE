@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import '../core/constants/app_constants.dart';
@@ -13,22 +14,83 @@ class StorageService {
   Directory? _cacheDir;
   Directory? _resourcesDir;
   Directory? _profileDir;
+  File? _configFile;
+  String? _customTransferPath;
 
   /// Initialize storage directories
   Future<void> initialize() async {
     _appDir = await getApplicationDocumentsDirectory();
+    _configFile = File('${_appDir!.path}/storage_config.json');
+    await _loadCustomPath();
 
-    _transferDir = Directory('${_appDir!.path}/${AppConstants.transferDirectory}');
+    if (_customTransferPath != null) {
+      _transferDir = Directory(_customTransferPath!);
+    } else {
+      _transferDir = await _resolveTransferDir();
+    }
+
     _cacheDir = Directory('${_appDir!.path}/${AppConstants.cacheDirectory}');
-    _resourcesDir =
-        Directory('${_appDir!.path}/${AppConstants.sharedResourcesDirectory}');
-    _profileDir =
-        Directory('${_appDir!.path}/${AppConstants.profileImagesDirectory}');
+    _resourcesDir = Directory(
+      '${_appDir!.path}/${AppConstants.sharedResourcesDirectory}',
+    );
+    _profileDir = Directory(
+      '${_appDir!.path}/${AppConstants.profileImagesDirectory}',
+    );
 
     await _transferDir!.create(recursive: true);
     await _cacheDir!.create(recursive: true);
     await _resourcesDir!.create(recursive: true);
     await _profileDir!.create(recursive: true);
+  }
+
+  /// Resolve the best transfer directory: try Downloads first, fall back gracefully
+  Future<Directory> _resolveTransferDir() async {
+    // Try public Downloads folder (survives uninstall)
+    final downloadsPath = await _getDownloadsPath();
+    if (downloadsPath != null) {
+      try {
+        final dir = Directory(downloadsPath);
+        await dir.create(recursive: true);
+        return dir;
+      } catch (_) {
+        // Permission denied or other error — fall through to fallback
+      }
+    }
+    // Fallback to app-external storage (also accessible, but deleted on uninstall)
+    try {
+      final extDir = await getExternalStorageDirectory();
+      if (extDir != null) {
+        final fallback = Directory(
+          '${extDir.path}/${AppConstants.transferDirectory}',
+        );
+        await fallback.create(recursive: true);
+        return fallback;
+      }
+    } catch (_) {}
+    // Final fallback to app documents directory
+    final fallback = Directory(
+      '${_appDir!.path}/${AppConstants.transferDirectory}',
+    );
+    await fallback.create(recursive: true);
+    return fallback;
+  }
+
+  /// Get public Downloads path that survives app uninstall, or null if not accessible
+  Future<String?> _getDownloadsPath() async {
+    try {
+      final extDir = await getExternalStorageDirectory();
+      if (extDir != null) {
+        final path = extDir.path;
+        // extDir is like /storage/emulated/0/Android/data/<package>/files
+        // We want /storage/emulated/0/Download/AfriShare
+        final baseIndex = path.indexOf('/Android');
+        if (baseIndex > 0) {
+          final storageRoot = path.substring(0, baseIndex);
+          return '$storageRoot/Download/AfriShare';
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   String get transferPath => _transferDir!.path;
@@ -39,6 +101,42 @@ class StorageService {
   Directory get transferDirectory => _transferDir!;
   Directory get cacheDirectory => _cacheDir!;
   Directory get resourcesDirectory => _resourcesDir!;
+
+  /// Load custom storage path from config file
+  Future<void> _loadCustomPath() async {
+    try {
+      if (_configFile != null && await _configFile!.exists()) {
+        final content = await _configFile!.readAsString();
+        final data = jsonDecode(content) as Map<String, dynamic>;
+        _customTransferPath = data['transferPath'] as String?;
+      }
+    } catch (_) {
+      _customTransferPath = null;
+    }
+  }
+
+  /// Save custom storage path to config file
+  Future<void> setCustomPath(String path) async {
+    _customTransferPath = path;
+    final data = jsonEncode({'transferPath': path});
+    if (_configFile != null) {
+      await _configFile!.writeAsString(data);
+    }
+    // Re-create transfer directory at new location
+    _transferDir = Directory(path);
+    await _transferDir!.create(recursive: true);
+  }
+
+  /// Reset to default app storage
+  Future<void> resetToDefaultPath() async {
+    _customTransferPath = null;
+    if (_configFile != null && await _configFile!.exists()) {
+      await _configFile!.delete();
+    }
+    _transferDir = await _resolveTransferDir();
+  }
+
+  bool get hasCustomPath => _customTransferPath != null;
 
   /// Get storage usage statistics
   Future<Map<String, dynamic>> getStorageStats() async {

@@ -27,7 +27,9 @@ class DatabaseHelper {
   }
 
   Future<void> _onConfigure(Database db) async {
-    await db.execute('PRAGMA journal_mode = WAL;');
+    try {
+      await db.rawQuery('PRAGMA journal_mode = WAL;');
+    } catch (_) {}
     await db.execute('PRAGMA foreign_keys = ON;');
   }
 
@@ -89,9 +91,7 @@ class DatabaseHelper {
         error_message TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        completed_at TEXT,
-        FOREIGN KEY (sender_id) REFERENCES users(id),
-        FOREIGN KEY (receiver_id) REFERENCES users(id)
+        completed_at TEXT
       )
     ''');
 
@@ -110,9 +110,7 @@ class DatabaseHelper {
         file_size INTEGER,
         is_encrypted INTEGER DEFAULT 1,
         is_read INTEGER DEFAULT 0,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (sender_id) REFERENCES users(id),
-        FOREIGN KEY (receiver_id) REFERENCES users(id)
+        created_at TEXT NOT NULL
       )
     ''');
 
@@ -163,12 +161,84 @@ class DatabaseHelper {
       )
     ''');
 
+    // Paired device keys table
+    await db.execute('''
+      CREATE TABLE paired_keys (
+        device_id TEXT PRIMARY KEY,
+        device_name TEXT NOT NULL,
+        encryption_key TEXT NOT NULL,
+        encryption_iv TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    // Contact nicknames table
+    await db.execute('''
+      CREATE TABLE contact_nicknames (
+        contact_id TEXT PRIMARY KEY,
+        nickname TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    // Pending messages table (offline message delivery)
+    await db.execute('''
+      CREATE TABLE pending_messages (
+        id TEXT PRIMARY KEY,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        receiver_name TEXT NOT NULL,
+        message TEXT,
+        message_type TEXT DEFAULT 'text',
+        created_at TEXT NOT NULL
+      )
+    ''');
+
     // Insert default settings
     await _insertDefaultSettings(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Handle future migrations
+    // Migration: v1 -> v2 — add paired_keys table
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS paired_keys (
+          device_id TEXT PRIMARY KEY,
+          device_name TEXT NOT NULL,
+          encryption_key TEXT NOT NULL,
+          encryption_iv TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+    }
+    // Migration: v2 -> v3 — add contact_nicknames table
+    if (oldVersion < 3) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS contact_nicknames (
+          contact_id TEXT PRIMARY KEY,
+          nickname TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+    }
+    // Migration: v3 -> v4 — add pending_messages table for offline delivery
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS pending_messages (
+          id TEXT PRIMARY KEY,
+          sender_id TEXT NOT NULL,
+          sender_name TEXT NOT NULL,
+          receiver_id TEXT NOT NULL,
+          receiver_name TEXT NOT NULL,
+          message TEXT,
+          message_type TEXT DEFAULT 'text',
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
   }
 
   Future<void> _insertDefaultSettings(Database db) async {
@@ -330,6 +400,45 @@ class DatabaseHelper {
       await txn.delete('shared_resources');
       await txn.delete('notifications');
       await txn.delete('devices');
+      await txn.delete('paired_keys');
     });
+  }
+
+  // Paired keys operations
+  Future<void> savePairedKeys(String deviceId, String deviceName, String key, String iv) async {
+    final now = DateTime.now().toIso8601String();
+    final db = await database;
+    await db.insert(
+      'paired_keys',
+      {
+        'device_id': deviceId,
+        'device_name': deviceName,
+        'encryption_key': key,
+        'encryption_iv': iv,
+        'created_at': now,
+        'updated_at': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Map<String, dynamic>?> getPairedKeys(String deviceId) async {
+    final result = await query(
+      'paired_keys',
+      where: 'device_id = ?',
+      whereArgs: [deviceId],
+    );
+    if (result.isNotEmpty) {
+      return result.first;
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>> getAllPairedKeys() async {
+    return await query('paired_keys');
+  }
+
+  Future<void> deletePairedKeys(String deviceId) async {
+    await delete('paired_keys', 'device_id = ?', [deviceId]);
   }
 }

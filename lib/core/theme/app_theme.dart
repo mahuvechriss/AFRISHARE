@@ -73,7 +73,9 @@ class AppTheme {
           textStyle: const TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
+            decoration: TextDecoration.none,
           ),
+          foregroundColor: AppColors.primaryGreen,
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -100,7 +102,7 @@ class AppTheme {
         hintStyle: TextStyle(color: Colors.grey.shade400),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        elevation: 8,
+        elevation: 0,
         selectedItemColor: AppColors.primaryGreen,
         unselectedItemColor: AppColors.textLight,
         type: BottomNavigationBarType.fixed,

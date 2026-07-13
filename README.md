@@ -249,3 +249,35 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Support
 
 For support, email support@afrishare.com or visit our documentation at docs.afrishare.com
+
+
+
+READ THIS OPEN AI 
+"makes two devices communicate by creating a local peer-to-peer network, usually without needing internet.
+
+Here’s the core idea:
+
+One device becomes a hotspot
+The sender often creates a Wi-Fi hotspot.
+Or both devices use Wi-Fi Direct (a direct Wi-Fi connection between devices).
+The other device connects to it
+The receiver joins that temporary network.
+This creates a private local LAN between the two phones.
+Device discovery & pairing
+They identify each other using:
+QR code scanning, or
+automatic discovery over the local network (broadcast packets).
+File transfer happens over standard network protocols
+Data is split into packets and sent via:
+TCP (reliable transfer) or sometimes UDP (faster but less strict).
+The app manages retries, ordering, and reconstruction.
+No internet required
+Everything stays inside the local Wi-Fi link.
+That’s why it’s fast and doesn’t use mobile data.
+Extra optimization tricks
+Compression before sending (to speed up transfer)
+Parallel connections (sending chunks at the same time)
+Switching between Wi-Fi Direct and hotspot depending on device support
+
+In short:
+👉 Xender turns your phone into a mini local network router and moves files over Wi-Fi protocols instead of the internet."

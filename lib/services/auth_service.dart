@@ -12,19 +12,27 @@ class AuthService {
 
   UserModel? _currentUser;
   bool _isInitialized = false;
+  String _deviceModelName = 'My Device';
 
   UserModel? get currentUser => _currentUser;
   bool get isLoggedIn => _currentUser != null;
   bool get isGuest => _currentUser?.isGuest ?? true;
   bool get isInitialized => _isInitialized;
+  String get deviceModelName => _deviceModelName;
 
   /// Initialize auth service. Creates guest session if no user exists.
-  Future<void> initialize() async {
+  Future<void> initialize({String? deviceModelName}) async {
     if (_isInitialized) return;
+    _deviceModelName = deviceModelName ?? 'My Device';
 
     final users = await _db.query('users', limit: 1);
     if (users.isNotEmpty) {
       _currentUser = UserModel.fromJson(users.first);
+      // Update stale default device name to real model
+      if (_currentUser!.deviceName == 'My Device' ||
+          _currentUser!.deviceName.isEmpty) {
+        await updateProfile(deviceName: _deviceModelName);
+      }
     } else {
       // Create guest user
       _currentUser = await _createGuestUser();
@@ -40,7 +48,7 @@ class AuthService {
       id: _uuid.v4(),
       username: 'Guest User',
       deviceId: deviceId,
-      deviceName: 'My Device',
+      deviceName: _deviceModelName,
       isGuest: true,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
@@ -50,30 +58,27 @@ class AuthService {
     return guest;
   }
 
-  /// Register a new user account
+  /// Register a new user account (upgrades guest to registered user in-place)
   Future<UserModel> register({
     required String username,
     String? email,
     String? phone,
     String? deviceName,
   }) async {
-    final deviceId = _currentUser?.deviceId ?? 'device_${_uuid.v4().substring(0, 8)}';
-    final user = UserModel(
-      id: _uuid.v4(),
+    if (_currentUser == null) throw Exception('No user logged in');
+
+    final updated = _currentUser!.copyWith(
       username: username,
       email: email,
       phone: phone,
-      deviceId: deviceId,
-      deviceName: deviceName ?? _currentUser?.deviceName ?? 'My Device',
+      deviceName: deviceName ?? username,
       isGuest: false,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
     );
 
-    await _db.insert('users', user.toJson());
-    _currentUser = user;
+    await _db.update('users', updated.toJson(), 'id = ?', [updated.id]);
+    _currentUser = updated;
 
-    return user;
+    return updated;
   }
 
   /// Update user profile
@@ -94,12 +99,7 @@ class AuthService {
       deviceName: deviceName,
     );
 
-    await _db.update(
-      'users',
-      updated.toJson(),
-      'id = ?',
-      [updated.id],
-    );
+    await _db.update('users', updated.toJson(), 'id = ?', [updated.id]);
     _currentUser = updated;
 
     return updated;
@@ -123,7 +123,11 @@ class AuthService {
 
   /// Get user by ID
   Future<UserModel?> getUserById(String userId) async {
-    final result = await _db.query('users', where: 'id = ?', whereArgs: [userId]);
+    final result = await _db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
     if (result.isNotEmpty) {
       return UserModel.fromJson(result.first);
     }

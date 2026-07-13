@@ -29,6 +29,10 @@
     <!-- Required for QR code scanning -->
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- Required for Voice/Video Calls -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
     <!-- Required for foreground service during transfers -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -38,7 +42,7 @@
         android:label="AfriShare"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:requestLegacyExternalStorage="true">
+        android:requestLegacyExternalStorage="true" android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -79,3 +83,4 @@
         </intent>
     </queries>
 </manifest>
+

@@ -19,14 +19,15 @@ class EmptyStateWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppColors.primaryGreenSurface,
@@ -34,16 +35,16 @@ class EmptyStateWidget extends StatelessWidget {
               child: Icon(
                 icon,
                 size: 48,
-                color: AppColors.primaryGreen,
+                color: AppColors.primaryGreen.withValues(alpha: 0.6),
               ),
             ),
             const SizedBox(height: 24),
             Text(
               title,
-              style: const TextStyle(
-                fontSize: 20,
+              style: TextStyle(
+                fontSize: 18,
                 fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
+                color: isDark ? Colors.white70 : Colors.black54,
               ),
               textAlign: TextAlign.center,
             ),
@@ -53,7 +54,7 @@ class EmptyStateWidget extends StatelessWidget {
                 subtitle!,
                 style: TextStyle(
                   fontSize: 14,
-                  color: Colors.grey.shade600,
+                  color: isDark ? Colors.white38 : Colors.grey.shade500,
                 ),
                 textAlign: TextAlign.center,
               ),

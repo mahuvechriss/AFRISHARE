@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
-import 'package:path_provider/path_provider.dart';
 import '../models/device_model.dart';
 import '../models/transfer_model.dart';
 import '../models/chat_message_model.dart';
@@ -12,38 +11,27 @@ import 'encryption_service.dart';
 import 'transfer_service.dart';
 import 'discovery_service.dart';
 import 'chat_service.dart';
+import 'http_transfer_service.dart';
+import 'network_discovery_service.dart';
+import 'storage_service.dart';
+import 'auth_service.dart';
 
-/// Platform-aware Nearby Connections integration.
-///
-/// On **Android/iOS:** Integrates with the native `nearby_connections` package
-/// via method channels for real peer-to-peer discovery, connection, and file transfer.
-///
-/// On **Web/Desktop:** Provides a simulated mode for development and testing,
-/// where discoveries and transfers are tracked locally.
-///
-/// The native package is loaded dynamically at runtime so web compilation is unaffected.
-///
-/// ## Usage
-/// ```dart
-/// NearbyConnector.instance.initialize(deviceName: 'My Device');
-/// await NearbyConnector.instance.startDiscovery();
-/// await NearbyConnector.instance.startAdvertising();
-/// ```
 class NearbyConnector {
   NearbyConnector._();
   static final NearbyConnector instance = NearbyConnector._();
 
-  // Use late-initialized dynamic for the native instance
   final Uuid _uuid = const Uuid();
   final EncryptionService _encryption = EncryptionService.instance;
   final TransferService _transferService = TransferService.instance;
-  final DiscoveryService _discoveryService = DiscoveryService.instance;
+  late final DiscoveryService _discoveryService = DiscoveryService.instance;
   final ChatService _chatService = ChatService.instance;
+  final HttpTransferService _httpTransfer = HttpTransferService.instance;
+  final NetworkDiscoveryService _networkDiscovery =
+      NetworkDiscoveryService.instance;
 
   final Set<String> _connectedEndpoints = {};
   final Map<String, String> _endpointDeviceMap = {};
 
-  // Callbacks
   void Function(String endpointId, String deviceId)? onConnected;
   void Function(String endpointId)? onDisconnected;
 
@@ -56,16 +44,57 @@ class NearbyConnector {
   bool get isNativeAvailable => _nativeAvailable;
   bool _nativeAvailable = false;
 
+  bool get isHttpServerRunning => _httpTransfer.isRunning;
+  String? get localIp => _httpTransfer.localIp;
+  int get httpPort => _httpTransfer.port;
+
   String _localEndpointName = 'AfriShare Device';
   String get localEndpointName => _localEndpointName;
 
-  /// Initialize. On Android/iOS, the native Nearby Connections engine is loaded
-  /// at runtime via MethodChannel. On other platforms, simulated mode is used.
-  void initialize({String? deviceName}) {
+  void initialize({String? deviceName, String? deviceId}) {
     _localEndpointName = deviceName ?? 'AfriShare Device';
     _nativeAvailable = _checkNativeSupport();
-    debugPrint('NearbyConnector: initialized on '
-        '${_nativeAvailable ? "native" : "simulated"} mode');
+
+    _httpTransfer.initialize(deviceName: _localEndpointName, deviceId: deviceId);
+    _networkDiscovery.initialize(deviceName: _localEndpointName, deviceId: deviceId);
+
+    _httpTransfer.onFileReceived?.listen((event) {
+      final deviceId = _endpointDeviceMap.entries
+          .firstWhere(
+            (e) => e.value == event.endpointId,
+            orElse: () => const MapEntry('', ''),
+          )
+          .key;
+      if (deviceId.isNotEmpty) {
+        _discoveryService.updateDeviceStatus(deviceId, DeviceStatus.paired);
+      }
+    });
+
+    // Register retry handler so failed sent transfers can be re-sent
+    _transferService.onRetryTransfer = (transfer) async {
+      final device = _discoveryService.getDeviceByDeviceId(transfer.receiverId);
+      if (device?.ipAddress == null || transfer.filePath == null) {
+        debugPrint('Nearby: Retry failed — no device or file path for ${transfer.id}');
+        return false;
+      }
+      final fileName = transfer.filePath!.contains(Platform.pathSeparator)
+          ? transfer.filePath!.split(Platform.pathSeparator).last
+          : transfer.fileName;
+      final result = await _httpTransfer.sendFile(
+        host: device!.ipAddress!,
+        port: device.port ?? AppConstants.discoveryPort,
+        filePath: transfer.filePath!,
+        fileName: fileName,
+        receiverId: device.deviceId,
+        receiverName: device.name,
+      );
+      return result['success'] == true;
+    };
+
+    debugPrint(
+      'NearbyConnector: initialized on '
+      '${_nativeAvailable ? "native" : "http"} mode',
+    );
   }
 
   bool _checkNativeSupport() {
@@ -76,35 +105,41 @@ class NearbyConnector {
     }
   }
 
-  /// Start advertising this device so others can discover it.
   Future<bool> startAdvertising() async {
     _isAdvertising = true;
-    debugPrint('Nearby: Advertising started as "$_localEndpointName" '
-        '(${_nativeAvailable ? "native" : "simulated"})');
+    try {
+      await _httpTransfer.startServer();
+      debugPrint(
+        'Nearby: HTTP server started on '
+        '${_httpTransfer.localIp}:${_httpTransfer.port}',
+      );
+    } catch (e) {
+      debugPrint('Nearby: Failed to start HTTP server: $e');
+    }
     return true;
   }
 
-  /// Stop advertising.
   Future<void> stopAdvertising() async {
     _isAdvertising = false;
-    debugPrint('Nearby: Advertising stopped');
+    // Do NOT stop the HTTP server — it was started globally at app launch
+    // and is needed by all screens (send, receive, discovery).
+    // Stopping it here would break file transfers for the entire app.
+    debugPrint('Nearby: Advertising stopped (HTTP server still running)');
   }
 
-  /// Start discovering nearby devices.
   Future<bool> startDiscovery() async {
     _isDiscovering = true;
-    debugPrint('Nearby: Discovery started '
-        '(${_nativeAvailable ? "native" : "simulated"})');
+    await _networkDiscovery.startDiscovery();
+    debugPrint('Nearby: Network discovery started');
     return true;
   }
 
-  /// Stop discovery.
   Future<void> stopDiscovery() async {
     _isDiscovering = false;
-    debugPrint('Nearby: Discovery stopped');
+    await _networkDiscovery.stopDiscovery();
+    debugPrint('Nearby: Network discovery stopped');
   }
 
-  /// Request connection to a discovered endpoint.
   Future<bool> requestConnection(String endpointId) async {
     _connectedEndpoints.add(endpointId);
     _discoveryService.updateDeviceStatus(endpointId, DeviceStatus.paired);
@@ -113,18 +148,15 @@ class NearbyConnector {
     return true;
   }
 
-  /// Accept an incoming connection request.
   Future<bool> acceptConnection(String endpointId) async {
     _connectedEndpoints.add(endpointId);
     return true;
   }
 
-  /// Reject an incoming connection.
   Future<void> rejectConnection(String endpointId) async {
     _connectedEndpoints.remove(endpointId);
   }
 
-  /// Disconnect from a specific endpoint.
   Future<void> disconnectFromEndpoint(String endpointId) async {
     _connectedEndpoints.remove(endpointId);
     _endpointDeviceMap.remove(endpointId);
@@ -132,14 +164,12 @@ class NearbyConnector {
     onDisconnected?.call(endpointId);
   }
 
-  /// Disconnect from all endpoints.
   Future<void> disconnectFromAllEndpoints() async {
     for (final endpointId in _connectedEndpoints.toList()) {
       await disconnectFromEndpoint(endpointId);
     }
   }
 
-  /// Send a file to a connected device.
   Future<bool> sendFile({
     required String endpointId,
     required String filePath,
@@ -150,33 +180,102 @@ class NearbyConnector {
       return false;
     }
 
-    // Encrypt and queue the transfer
-    final encryptedPath = await _encryption.encryptFile(filePath);
-    await _transferService.queueTransfer(
-      fileName: file.path.split('/').last,
-      fileSize: await file.length(),
-      fileType: file.path.split('.').last,
-      senderId: _encryption.currentKey.hashCode.toString(),
-      senderName: _localEndpointName,
-      receiverId: endpointId,
-      receiverName: _endpointDeviceMap[endpointId] ?? 'Nearby Device',
-      direction: TransferDirection.sent,
-      filePath: encryptedPath,
+    // Try to find device by deviceId first
+    DeviceModel? device = _discoveryService.getDeviceByDeviceId(endpointId);
+
+    // Fallback: try to find by IP if endpointId looks like an IP
+    if (device == null && endpointId.contains('.')) {
+      device = _discoveryService.getDeviceByIp(endpointId);
+    }
+
+    // Fallback: try to find any paired device
+    if (device == null) {
+      final pairedDevices = _discoveryService.discoveredDevices
+          .where((d) => d.isPaired && d.ipAddress != null)
+          .toList();
+      if (pairedDevices.isNotEmpty) {
+        device = pairedDevices.first;
+      }
+    }
+
+    if (device?.ipAddress == null) {
+      debugPrint('Nearby: No IP address for device $endpointId');
+      return false;
+    }
+
+    final fileName = file.path.split(Platform.pathSeparator).last;
+    final result = await _httpTransfer.sendFile(
+      host: device!.ipAddress!,
+      port: device.port ?? AppConstants.discoveryPort,
+      filePath: filePath,
+      fileName: fileName,
+      receiverId: device.deviceId,
+      receiverName: device.name,
     );
 
-    debugPrint('Nearby: Sent file $filePath to $endpointId');
-    return true;
+    final success = result['success'] == true;
+    if (success) {
+      _endpointDeviceMap[device.deviceId] = device.deviceId;
+      debugPrint('Nearby: Sent file $fileName to ${device.ipAddress}');
+    }
+
+    return success;
   }
 
-  /// Send a bytes payload (for chat messages or metadata).
   Future<bool> sendBytes(String endpointId, String data) async {
     debugPrint('Nearby: Sent bytes to $endpointId');
     return true;
   }
 
-  /// Send a chat message over the connection.
+  Future<Map<String, dynamic>> connectManually(
+    String ip,
+    int port,
+    String name,
+  ) async {
+    debugPrint('Nearby: Attempting manual connection to $ip:$port ($name)');
+
+    final test = await _httpTransfer.testConnection(ip, port: port);
+    if (test['success'] == true) {
+      final deviceInfo = await _httpTransfer.fetchDeviceInfo(ip);
+      final deviceName = deviceInfo?['device_name'] as String? ?? name;
+      _discoveryService.addDeviceByIp(ip, port, deviceName);
+      debugPrint(
+        'Nearby: Manual connection successful to $deviceName at $ip:$port',
+      );
+      return {'success': true, 'deviceName': deviceName};
+    } else {
+      debugPrint(
+        'Nearby: Manual connection failed to $ip:$port - ${test['error']}',
+      );
+      return test;
+    }
+  }
+
+  Future<Map<String, dynamic>> testConnection(
+    String ip, {
+    int port = AppConstants.discoveryPort,
+  }) async {
+    return await _httpTransfer.testConnection(ip, port: port);
+  }
+
+  Future<bool> requestTransfer({
+    required String host,
+    int port = AppConstants.discoveryPort,
+    required List<String> fileNames,
+    required List<int> fileSizes,
+  }) async {
+    return await _httpTransfer.requestTransfer(
+      host: host,
+      port: port,
+      fileNames: fileNames,
+      fileSizes: fileSizes,
+    );
+  }
+
   Future<bool> sendChatMessage(
-      String endpointId, Map<String, dynamic> messageData) async {
+    String endpointId,
+    Map<String, dynamic> messageData,
+  ) async {
     final payload = {
       'type': 'chat_message',
       'data': messageData,
@@ -185,9 +284,10 @@ class NearbyConnector {
     return await sendBytes(endpointId, jsonEncode(payload));
   }
 
-  /// Send transfer metadata (file info before transfer).
   Future<bool> sendTransferMetadata(
-      String endpointId, Map<String, dynamic> metadata) async {
+    String endpointId,
+    Map<String, dynamic> metadata,
+  ) async {
     final payload = {
       'type': 'transfer_metadata',
       'data': metadata,
@@ -196,7 +296,6 @@ class NearbyConnector {
     return await sendBytes(endpointId, jsonEncode(payload));
   }
 
-  /// Send encryption keys to a connected device.
   Future<bool> sendEncryptionKeys(String endpointId) async {
     final payload = {
       'type': 'encryption_keys',
@@ -206,7 +305,6 @@ class NearbyConnector {
     return await sendBytes(endpointId, jsonEncode(payload));
   }
 
-  /// Simulate receiving a payload (for test/development).
   Future<void> simulateIncomingPayload({
     required String endpointId,
     required String type,
@@ -216,11 +314,13 @@ class NearbyConnector {
     switch (type) {
       case 'chat_message':
         if (data != null) {
+          final myDeviceId = AuthService.instance.currentUser?.deviceId ??
+              _encryption.currentKey.hashCode.toString();
           final chatMessage = ChatMessageModel(
             id: _uuid.v4(),
             senderId: endpointId,
             senderName: data['sender_name'] as String? ?? 'Nearby Device',
-            receiverId: _encryption.currentKey.hashCode.toString(),
+            receiverId: myDeviceId,
             receiverName: 'Me',
             message: data['text'] as String?,
             messageType: MessageType.text,
@@ -239,8 +339,7 @@ class NearbyConnector {
             fileType: data['file_type'] as String? ?? 'unknown',
             mimeType: data['mime_type'] as String?,
             senderId: endpointId,
-            senderName:
-                data['sender_name'] as String? ?? 'Nearby Device',
+            senderName: data['sender_name'] as String? ?? 'Nearby Device',
             receiverId: _encryption.currentKey.hashCode.toString(),
             receiverName: 'Me',
             direction: TransferDirection.received,
@@ -257,12 +356,10 @@ class NearbyConnector {
   }
 
   Future<void> _handleFilePayload(
-      String endpointId, String receivedFilePath) async {
-    final dir = await getTemporaryDirectory();
-    final transferDir = Directory(
-        '${dir.path}/${AppConstants.transferDirectory}');
-    await transferDir.create(recursive: true);
-
+    String endpointId,
+    String receivedFilePath,
+  ) async {
+    final transferDir = StorageService.instance.transferDirectory;
     final destPath =
         '${transferDir.path}/${DateTime.now().millisecondsSinceEpoch}_received';
     final file = File(receivedFilePath);
@@ -296,10 +393,19 @@ class NearbyConnector {
     );
   }
 
-  /// Clean up all connections.
+  /// Update the device name across all services
+  void updateDeviceName(String name) {
+    _localEndpointName = name;
+    _httpTransfer.updateDeviceName(name);
+    _networkDiscovery.updateDeviceName(name);
+    debugPrint('NearbyConnector: Device name updated to "$name"');
+  }
+
   Future<void> dispose() async {
     await disconnectFromAllEndpoints();
     await stopAdvertising();
     await stopDiscovery();
+    await _httpTransfer.dispose();
+    await _networkDiscovery.dispose();
   }
 }

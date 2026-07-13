@@ -1,10 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:open_file/open_file.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/transfer_model.dart';
 import '../../providers/transfer_provider.dart';
 import '../../widgets/transfer/transfer_tile.dart';
-import '../../widgets/common/empty_state.dart';
 
 class TransferQueueScreen extends ConsumerStatefulWidget {
   const TransferQueueScreen({super.key});
@@ -32,7 +34,15 @@ class _TransferQueueScreenState extends ConsumerState<TransferQueueScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final transferState = ref.watch(transferListProvider);
+    final sent = transferState.transfers
+        .where((t) => t.direction == TransferDirection.sent)
+        .toList();
+    final received = transferState.transfers
+        .where((t) => t.direction == TransferDirection.received)
+        .toList();
+
     return Column(
       children: [
         // Summary Cards
@@ -40,38 +50,59 @@ class _TransferQueueScreenState extends ConsumerState<TransferQueueScreen>
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: Row(
             children: [
-              _SummaryChip(
+              _SummaryCard(
+                icon: Icons.arrow_upward_rounded,
+                label: 'Sent',
+                count: sent.length,
+                color: AppColors.primaryBlue,
+              ),
+              const SizedBox(width: 8),
+              _SummaryCard(
+                icon: Icons.arrow_downward_rounded,
+                label: 'Received',
+                count: received.length,
+                color: AppColors.primaryGreen,
+              ),
+              const SizedBox(width: 8),
+              _SummaryCard(
+                icon: Icons.hourglass_empty_rounded,
                 label: 'Active',
                 count: transferState.activeTransfers.length,
-                color: AppColors.transferProgress,
-              ),
-              const SizedBox(width: 8),
-              _SummaryChip(
-                label: 'Completed',
-                count: transferState.completedTransfers.length,
-                color: AppColors.transferCompleted,
-              ),
-              const SizedBox(width: 8),
-              _SummaryChip(
-                label: 'Failed',
-                count: transferState.failedTransfers.length,
-                color: AppColors.transferFailed,
+                color: AppColors.primaryBlueLight,
               ),
             ],
           ),
         ),
 
         // Tab Bar
-        TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Active'),
-            Tab(text: 'Completed'),
-            Tab(text: 'History'),
-          ],
-          labelColor: AppColors.primaryGreen,
-          unselectedLabelColor: Colors.grey,
-          indicatorColor: AppColors.primaryGreen,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Container(
+            decoration: BoxDecoration(
+              color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: 'All'),
+                Tab(text: 'Sent'),
+                Tab(text: 'Received'),
+              ],
+              labelColor: Colors.white,
+              unselectedLabelColor: isDark
+                  ? Colors.grey.shade400
+                  : Colors.grey.shade600,
+              indicator: BoxDecoration(
+                color: AppColors.primaryGreen,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              indicatorSize: TabBarIndicatorSize.tab,
+              dividerHeight: 0,
+              splashFactory: NoSplash.splashFactory,
+              overlayColor: WidgetStatePropertyAll(Colors.transparent),
+            ),
+          ),
         ),
 
         // Tab Content
@@ -79,9 +110,9 @@ class _TransferQueueScreenState extends ConsumerState<TransferQueueScreen>
           child: TabBarView(
             controller: _tabController,
             children: [
-              _buildActiveTab(transferState),
-              _buildCompletedTab(transferState),
-              _buildHistoryTab(transferState),
+              _buildTransferList(transferState.transfers, isDark),
+              _buildTransferList(sent, isDark),
+              _buildTransferList(received, isDark),
             ],
           ),
         ),
@@ -89,80 +120,72 @@ class _TransferQueueScreenState extends ConsumerState<TransferQueueScreen>
     );
   }
 
-  Widget _buildActiveTab(TransferListState state) {
-    final active = state.activeTransfers;
-
-    if (active.isEmpty) {
-      return const EmptyStateWidget(
-        icon: Icons.check_circle_outline_rounded,
-        title: 'No active transfers',
-        subtitle: 'Your transfers will appear here',
+  Widget _buildTransferList(List<TransferModel> transfers, bool isDark) {
+    if (transfers.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.primaryGreenSurface,
+                ),
+                child: Icon(
+                  Icons.swap_horiz_rounded,
+                  size: 48,
+                  color: AppColors.primaryGreen.withValues(alpha: 0.6),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Nothing here yet',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Start sharing files with nearby devices',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white38 : Colors.grey.shade500,
+                ),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
+    final sorted = List<TransferModel>.from(transfers)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
     return ListView.builder(
       padding: const EdgeInsets.only(top: 8, bottom: 16),
-      itemCount: active.length,
+      itemCount: sorted.length,
       itemBuilder: (context, index) {
-        final transfer = active[index];
+        final transfer = sorted[index];
         return TransferTile(
           transfer: transfer,
-          onPause: () =>
-              ref.read(transferListProvider.notifier).pauseTransfer(transfer.id),
-          onResume: () =>
-              ref.read(transferListProvider.notifier).resumeTransfer(transfer.id),
-          onCancel: () =>
-              ref.read(transferListProvider.notifier).cancelTransfer(transfer.id),
-          onRetry: () =>
-              ref.read(transferListProvider.notifier).retryTransfer(transfer.id),
-        );
-      },
-    );
-  }
-
-  Widget _buildCompletedTab(TransferListState state) {
-    final completed = state.completedTransfers;
-
-    if (completed.isEmpty) {
-      return const EmptyStateWidget(
-        icon: Icons.done_all_rounded,
-        title: 'No completed transfers',
-        subtitle: 'Completed transfers will show here',
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.only(top: 8, bottom: 16),
-      itemCount: completed.length,
-      itemBuilder: (context, index) {
-        return TransferTile(
-          transfer: completed[index],
-          onTap: () => _showTransferDetails(completed[index]),
-        );
-      },
-    );
-  }
-
-  Widget _buildHistoryTab(TransferListState state) {
-    final history = state.transfers
-        .where((t) => t.isTerminal)
-        .toList();
-
-    if (history.isEmpty) {
-      return const EmptyStateWidget(
-        icon: Icons.history_rounded,
-        title: 'No transfer history',
-        subtitle: 'Your transfer history will appear here',
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.only(top: 8, bottom: 16),
-      itemCount: history.length,
-      itemBuilder: (context, index) {
-        return TransferTile(
-          transfer: history[index],
-          onTap: () => _showTransferDetails(history[index]),
+          onTap: () => _showTransferDetails(transfer),
+          onPause: () => ref
+              .read(transferListProvider.notifier)
+              .pauseTransfer(transfer.id),
+          onResume: () => ref
+              .read(transferListProvider.notifier)
+              .resumeTransfer(transfer.id),
+          onCancel: () => ref
+              .read(transferListProvider.notifier)
+              .cancelTransfer(transfer.id),
+          onRetry: () => ref
+              .read(transferListProvider.notifier)
+              .retryTransfer(transfer.id),
         );
       },
     );
@@ -180,12 +203,28 @@ class _TransferQueueScreenState extends ConsumerState<TransferQueueScreen>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              transfer.fileName,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
+            Row(
+              children: [
+                Icon(
+                  transfer.direction == TransferDirection.sent
+                      ? Icons.arrow_upward_rounded
+                      : Icons.arrow_downward_rounded,
+                  size: 20,
+                  color: transfer.direction == TransferDirection.sent
+                      ? AppColors.primaryBlue
+                      : AppColors.primaryGreen,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    transfer.fileName,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             _DetailRow(
@@ -201,28 +240,83 @@ class _TransferQueueScreenState extends ConsumerState<TransferQueueScreen>
             _DetailRow(
               icon: Icons.storage,
               label: 'Size',
-              value: transfer.fileSize.toString(),
+              value: _formatBytes(transfer.fileSize),
             ),
             _DetailRow(
-              icon: Icons.person,
-              label: transfer.direction.name == 'sent'
-                  ? 'Receiver'
-                  : 'Sender',
-              value: transfer.senderName ?? 'Unknown',
+              icon: transfer.direction == TransferDirection.sent
+                  ? Icons.person
+                  : Icons.person_outline,
+              label: transfer.direction == TransferDirection.sent
+                  ? 'Sent to'
+                  : 'From',
+              value: transfer.direction == TransferDirection.sent
+                  ? (transfer.receiverName ?? 'Unknown')
+                  : (transfer.senderName ?? 'Unknown'),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                if (transfer.filePath != null &&
+                    File(transfer.filePath!).existsSync()) ...[
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => OpenFile.open(transfer.filePath!),
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      label: const Text('Open'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryGreen,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () =>
+                          Share.shareXFiles([XFile(transfer.filePath!)]),
+                      icon: const Icon(Icons.share, size: 18),
+                      label: const Text('Share'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primaryGreen,
+                        side: const BorderSide(color: AppColors.primaryGreen),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),
       ),
     );
   }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
 }
 
-class _SummaryChip extends StatelessWidget {
+class _SummaryCard extends StatelessWidget {
+  final IconData icon;
   final String label;
   final int count;
   final Color color;
 
-  const _SummaryChip({
+  const _SummaryCard({
+    required this.icon,
     required this.label,
     required this.count,
     required this.color,
@@ -232,27 +326,32 @@ class _SummaryChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(12),
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
           children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(height: 6),
             Text(
               '$count',
               style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
                 color: color,
+                height: 1,
               ),
             ),
             const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
                 color: color,
+                letterSpacing: 0.3,
               ),
             ),
           ],
@@ -283,18 +382,12 @@ class _DetailRow extends StatelessWidget {
           const SizedBox(width: 12),
           Text(
             label,
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 14,
-            ),
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
           ),
           const Spacer(),
           Text(
             value,
-            style: const TextStyle(
-              fontWeight: FontWeight.w500,
-              fontSize: 14,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
           ),
         ],
       ),

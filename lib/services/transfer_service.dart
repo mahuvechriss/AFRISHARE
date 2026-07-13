@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'package:uuid/uuid.dart';
 import '../models/transfer_model.dart';
-import '../core/database/database_helper.dart';import '../core/constants/app_constants.dart';
+import '../core/database/database_helper.dart';
+import '../core/constants/app_constants.dart';
 
 /// Service managing file transfers between devices
 class TransferService {
@@ -20,6 +21,8 @@ class TransferService {
   void Function(TransferModel transfer)? onTransferAdded;
   void Function(TransferModel transfer)? onTransferUpdated;
   void Function(TransferModel transfer)? onTransferRemoved;
+  /// Called when a transfer needs to be re-sent (e.g. on retry)
+  Future<bool> Function(TransferModel transfer)? onRetryTransfer;
 
   List<TransferModel> get transfers => List.unmodifiable(_transfers);
 
@@ -99,23 +102,40 @@ class TransferService {
         .toList();
 
     for (final transfer in queued) {
-      if (activeTransfers.length >= AppConstants.maxSimultaneousTransfers) break;
+      if (activeTransfers.length >= AppConstants.maxSimultaneousTransfers) {
+        break;
+      }
       await _startTransfer(transfer);
     }
   }
 
   /// Start a single transfer
   Future<void> _startTransfer(TransferModel transfer) async {
+    // Skip if already in terminal state
+    if (transfer.isTerminal) return;
+
+    // For HTTP-received transfers, the file is already saved by the HTTP
+    // handler - mark as completed immediately instead of simulating
+    if (transfer.direction == TransferDirection.received &&
+        transfer.filePath != null) {
+      await _updateTransferStatus(transfer, TransferStatus.completed);
+      return;
+    }
+
+    // For HTTP-sent transfers, the actual sending is handled by HttpTransferService.
+    // We still update status to connecting/transferring so UI can show progress,
+    // but we don't simulate - HttpTransferService will call updateProgress/markCompleted.
+    if (transfer.direction == TransferDirection.sent &&
+        transfer.filePath != null) {
+      await _updateTransferStatus(transfer, TransferStatus.connecting);
+      await _updateTransferStatus(transfer, TransferStatus.transferring);
+      return;
+    }
+
     try {
       await _updateTransferStatus(transfer, TransferStatus.connecting);
-
-      // In production, this would establish the connection with
-      // the receiving device using the transfer protocol
-
       await _updateTransferStatus(transfer, TransferStatus.transferring);
 
-      // Simulate transfer progress for demonstration
-      // In production, this would use actual socket/file streaming
       _cancelTokens[transfer.id] = CancelToken();
       await _simulateTransfer(transfer);
     } catch (e) {
@@ -134,35 +154,67 @@ class TransferService {
     final cancelToken = _cancelTokens[transfer.id];
     if (cancelToken == null) return;
 
-    const updateInterval = Duration(milliseconds: 100);
+    const updateInterval = Duration(milliseconds: 50);
     int transferred = 0;
-    const speed = 5000000; // 5 MB/s simulated speed
+    const speed = 20000000; // 20 MB/s simulated speed for max throughput
     final totalSize = transfer.fileSize;
+    final stopwatch = Stopwatch()..start();
 
     while (transferred < totalSize) {
       if (cancelToken.isCancelled) return;
 
-      transferred += speed ~/ 10; // per 100ms
+      transferred += speed ~/ 20; // per 50ms
       if (transferred > totalSize) transferred = totalSize;
 
       final progress = (transferred / totalSize * 100);
+      final elapsed = stopwatch.elapsedMilliseconds ~/ 1000;
+      final currentSpeed = elapsed > 0
+          ? (transferred / elapsed).toDouble()
+          : speed.toDouble();
       await _updateTransferProgress(
         transfer,
         progress.clamp(0, 100),
-        speed.toDouble(),
+        currentSpeed,
       );
 
       if (transferred >= totalSize) break;
       await Future.delayed(updateInterval);
     }
 
-    // In production, actual file transfer would:
-    // 1. Encrypt file chunks using EncryptionService
-    // 2. Send chunks over Wi-Fi Direct/Nearby Connections
-    // 3. Verify integrity with hash checks
-    // 4. Decrypt and reassemble on receiver side
-
     await _updateTransferStatus(transfer, TransferStatus.completed);
+  }
+
+  /// Mark a transfer as completed
+  Future<void> markCompleted(String transferId, {String? filePath}) async {
+    final index = _transfers.indexWhere((t) => t.id == transferId);
+    if (index < 0) return;
+    await _updateTransferStatus(
+      _transfers[index],
+      TransferStatus.completed,
+      filePath: filePath,
+    );
+  }
+
+  /// Mark a transfer as failed
+  Future<void> markFailed(String transferId, {String? errorMessage}) async {
+    final index = _transfers.indexWhere((t) => t.id == transferId);
+    if (index < 0) return;
+    await _updateTransferStatus(
+      _transfers[index],
+      TransferStatus.failed,
+      errorMessage: errorMessage,
+    );
+  }
+
+  /// Update transfer progress
+  Future<void> updateProgress(
+    String transferId,
+    double progress,
+    double speed,
+  ) async {
+    final index = _transfers.indexWhere((t) => t.id == transferId);
+    if (index < 0) return;
+    await _updateTransferProgress(_transfers[index], progress, speed);
   }
 
   /// Update transfer status
@@ -170,23 +222,20 @@ class TransferService {
     TransferModel transfer,
     TransferStatus status, {
     String? errorMessage,
+    String? filePath,
   }) async {
     final index = _transfers.indexWhere((t) => t.id == transfer.id);
     if (index < 0) return;
 
     final updated = transfer.copyWith(
       status: status,
+      filePath: filePath,
       errorMessage: errorMessage,
       completedAt: status == TransferStatus.completed ? DateTime.now() : null,
     );
 
     _transfers[index] = updated;
-    await _db.update(
-      'transfers',
-      updated.toJson(),
-      'id = ?',
-      [updated.id],
-    );
+    await _db.update('transfers', updated.toJson(), 'id = ?', [updated.id]);
     onTransferUpdated?.call(updated);
   }
 
@@ -206,18 +255,15 @@ class TransferService {
     );
 
     _transfers[index] = updated;
-    await _db.update(
-      'transfers',
-      updated.toJson(),
-      'id = ?',
-      [updated.id],
-    );
+    await _db.update('transfers', updated.toJson(), 'id = ?', [updated.id]);
     onTransferUpdated?.call(updated);
   }
 
   /// Pause a transfer
   Future<void> pauseTransfer(String transferId) async {
-    final transfer = _transfers.firstWhere((t) => t.id == transferId);
+    final index = _transfers.indexWhere((t) => t.id == transferId);
+    if (index < 0) return;
+    final transfer = _transfers[index];
     if (transfer.status != TransferStatus.transferring) return;
 
     await _updateTransferStatus(transfer, TransferStatus.paused);
@@ -225,7 +271,9 @@ class TransferService {
 
   /// Resume a paused transfer
   Future<void> resumeTransfer(String transferId) async {
-    final transfer = _transfers.firstWhere((t) => t.id == transferId);
+    final index = _transfers.indexWhere((t) => t.id == transferId);
+    if (index < 0) return;
+    final transfer = _transfers[index];
     if (transfer.status != TransferStatus.paused) return;
 
     await _startTransfer(transfer);
@@ -236,13 +284,17 @@ class TransferService {
     final cancelToken = _cancelTokens.remove(transferId);
     cancelToken?.cancel();
 
-    final transfer = _transfers.firstWhere((t) => t.id == transferId);
+    final index = _transfers.indexWhere((t) => t.id == transferId);
+    if (index < 0) return;
+    final transfer = _transfers[index];
     await _updateTransferStatus(transfer, TransferStatus.cancelled);
   }
 
   /// Retry a failed transfer
   Future<void> retryTransfer(String transferId) async {
-    final transfer = _transfers.firstWhere((t) => t.id == transferId);
+    final index = _transfers.indexWhere((t) => t.id == transferId);
+    if (index < 0) return;
+    final transfer = _transfers[index];
     if (transfer.status != TransferStatus.failed) return;
 
     final updated = transfer.copyWith(
@@ -251,17 +303,23 @@ class TransferService {
       errorMessage: null,
     );
 
-    final index = _transfers.indexWhere((t) => t.id == transferId);
     _transfers[index] = updated;
     await _db.update('transfers', updated.toJson(), 'id = ?', [transferId]);
     onTransferUpdated?.call(updated);
 
-    await _startTransfer(updated);
+    // If a retry handler is registered (e.g. NearbyConnector), delegate to it
+    if (onRetryTransfer != null) {
+      await onRetryTransfer!(updated);
+    } else {
+      await _startTransfer(updated);
+    }
   }
 
   /// Delete a transfer record
   Future<void> deleteTransfer(String transferId) async {
-    final transfer = _transfers.firstWhere((t) => t.id == transferId);
+    final index = _transfers.indexWhere((t) => t.id == transferId);
+    if (index < 0) return;
+    final transfer = _transfers[index];
 
     // Clean up file if it exists
     if (transfer.filePath != null) {
@@ -278,7 +336,9 @@ class TransferService {
 
   /// Open a completed transfer file
   Future<File?> openTransferFile(String transferId) async {
-    final transfer = _transfers.firstWhere((t) => t.id == transferId);
+    final index = _transfers.indexWhere((t) => t.id == transferId);
+    if (index < 0) return null;
+    final transfer = _transfers[index];
     if (transfer.filePath == null) return null;
     final file = File(transfer.filePath!);
     if (await file.exists()) return file;

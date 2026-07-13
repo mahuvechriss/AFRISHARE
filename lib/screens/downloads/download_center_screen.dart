@@ -92,6 +92,7 @@ class _DownloadCenterScreenState extends ConsumerState<DownloadCenterScreen>
             labelColor: AppColors.primaryGreen,
             unselectedLabelColor: Colors.grey,
             indicatorColor: AppColors.primaryGreen,
+            dividerColor: Colors.transparent,
             isScrollable: false,
           ),
 
@@ -104,20 +105,20 @@ class _DownloadCenterScreenState extends ConsumerState<DownloadCenterScreen>
                   transferState.completedTransfers
                       .where((t) => t.direction == TransferDirection.received)
                       .toList(),
-                  'No downloaded files yet',
+                  'Nothing downloaded yet',
                   Icons.download_for_offline_outlined,
                 ),
                 _buildTransferList(
                   transferState.transfers
                       .where((t) => t.direction == TransferDirection.sent)
                       .toList(),
-                  'No uploaded files yet',
+                  'Nothing uploaded yet',
                   Icons.upload_file_outlined,
                 ),
                 _buildFailedList(transferState.failedTransfers),
                 _buildTransferList(
                   transferState.transfers,
-                  'No transfers yet',
+                  'Nothing here yet',
                   Icons.swap_horiz_rounded,
                 ),
               ],
@@ -129,7 +130,11 @@ class _DownloadCenterScreenState extends ConsumerState<DownloadCenterScreen>
   }
 
   Widget _buildSummaryCard(
-      String label, int count, Color color, IconData icon) {
+    String label,
+    int count,
+    Color color,
+    IconData icon,
+  ) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -149,13 +154,7 @@ class _DownloadCenterScreenState extends ConsumerState<DownloadCenterScreen>
                 color: color,
               ),
             ),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                color: color,
-              ),
-            ),
+            Text(label, style: TextStyle(fontSize: 11, color: color)),
           ],
         ),
       ),
@@ -163,12 +162,15 @@ class _DownloadCenterScreenState extends ConsumerState<DownloadCenterScreen>
   }
 
   Widget _buildTransferList(
-      List<TransferModel> transfers, String emptyMessage, IconData emptyIcon) {
+    List<TransferModel> transfers,
+    String emptyMessage,
+    IconData emptyIcon,
+  ) {
     if (transfers.isEmpty) {
       return EmptyStateWidget(
         icon: emptyIcon,
         title: emptyMessage,
-        subtitle: 'Transfers will appear here once completed',
+        subtitle: 'Share files and they will show up here',
       );
     }
 
@@ -191,8 +193,8 @@ class _DownloadCenterScreenState extends ConsumerState<DownloadCenterScreen>
     if (failedTransfers.isEmpty) {
       return const EmptyStateWidget(
         icon: Icons.check_circle_outline_rounded,
-        title: 'No failed transfers',
-        subtitle: 'Failed transfers will appear here for retry',
+        title: 'All clear',
+        subtitle: 'Failed transfers can be retried here',
       );
     }
 
@@ -204,8 +206,9 @@ class _DownloadCenterScreenState extends ConsumerState<DownloadCenterScreen>
         return _DownloadTile(
           transfer: transfer,
           isFailed: true,
-          onRetry: () =>
-              ref.read(transferListProvider.notifier).retryTransfer(transfer.id),
+          onRetry: () => ref
+              .read(transferListProvider.notifier)
+              .retryTransfer(transfer.id),
           onDelete: () => _deleteTransfer(transfer.id),
         );
       },
@@ -233,7 +236,8 @@ class _DownloadCenterScreenState extends ConsumerState<DownloadCenterScreen>
       builder: (context) => AlertDialog(
         title: const Text('Delete Transfer'),
         content: const Text(
-            'This will remove the transfer record and delete the file. Continue?'),
+          'This will remove the transfer record and delete the file. Continue?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -313,11 +317,7 @@ class _DownloadTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
                 color: _getFileColor().withValues(alpha: 0.1),
               ),
-              child: Icon(
-                _getFileIcon(),
-                color: _getFileColor(),
-                size: 22,
-              ),
+              child: Icon(_getFileIcon(), color: _getFileColor(), size: 22),
             ),
             const SizedBox(width: 12),
             // File info
@@ -347,7 +347,9 @@ class _DownloadTile extends StatelessWidget {
                       const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: isFailed
                               ? AppColors.error.withValues(alpha: 0.1)

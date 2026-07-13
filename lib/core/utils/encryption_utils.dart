@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:crypto/crypto.dart';
 
@@ -44,48 +45,24 @@ class EncryptionUtils {
     return encrypter.decrypt(encrypted, iv: encIV);
   }
 
-  /// Encrypt file bytes
+  /// Encrypt file bytes using standard AES-256-CBC with PKCS7 padding
   static List<int> encryptFileBytes(List<int> bytes, String key, String iv) {
     final encKey = encrypt.Key.fromBase64(key);
     final encIV = encrypt.IV.fromBase64(iv);
     final encrypter = encrypt.Encrypter(encrypt.AES(encKey, mode: encrypt.AESMode.cbc));
 
-    // Encrypt in chunks for large files
-    final chunkSize = 1024 * 1024; // 1MB chunks
-    final List<int> encryptedBytes = [];
-
-    for (var i = 0; i < bytes.length; i += chunkSize) {
-      final end = (i + chunkSize > bytes.length) ? bytes.length : i + chunkSize;
-      final chunk = bytes.sublist(i, end);
-      final chunkStr = base64Encode(chunk);
-      final encrypted = encrypter.encrypt(chunkStr, iv: encIV);
-      encryptedBytes.addAll(utf8.encode(encrypted.base64));
-      if (end < bytes.length) {
-        encryptedBytes.add(0); // separator
-      }
-    }
-
-    return encryptedBytes;
+    final encrypted = encrypter.encryptBytes(bytes, iv: encIV);
+    return encrypted.bytes;
   }
 
-  /// Decrypt file bytes
+  /// Decrypt file bytes using standard AES-256-CBC with PKCS7 padding
   static List<int> decryptFileBytes(List<int> encryptedBytes, String key, String iv) {
     final encKey = encrypt.Key.fromBase64(key);
     final encIV = encrypt.IV.fromBase64(iv);
     final encrypter = encrypt.Encrypter(encrypt.AES(encKey, mode: encrypt.AESMode.cbc));
 
-    final parts = String.fromCharCodes(encryptedBytes).split('\x00');
-    final List<int> decryptedBytes = [];
-
-    for (final part in parts) {
-      if (part.isNotEmpty) {
-        final encrypted = encrypt.Encrypted.fromBase64(part);
-        final decrypted = encrypter.decrypt(encrypted, iv: encIV);
-        decryptedBytes.addAll(base64Decode(decrypted));
-      }
-    }
-
-    return decryptedBytes;
+    final encrypted = encrypt.Encrypted(Uint8List.fromList(encryptedBytes));
+    return encrypter.decryptBytes(encrypted, iv: encIV);
   }
 
   /// Hash a string using SHA-256

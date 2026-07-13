@@ -10,7 +10,7 @@ class AppConstants {
 
   // Storage
   static const String dbName = 'afrishare.db';
-  static const int dbVersion = 1;
+  static const int dbVersion = 4;
   static const String transferDirectory = 'afrishare_transfers';
   static const String cacheDirectory = 'afrishare_cache';
   static const String sharedResourcesDirectory = 'afrishare_resources';

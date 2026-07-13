@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart' as fp;
 import '../../core/theme/app_colors.dart';
 import '../../core/constants/app_constants.dart';
 import '../../models/shared_resource_model.dart';
@@ -151,11 +153,12 @@ class _CommunityLibraryScreenState
         // Resources List
         Expanded(
           child: resourceState.filteredResources.isEmpty
-              ? const EmptyStateWidget(
+              ? EmptyStateWidget(
                   icon: Icons.library_books_outlined,
                   title: 'No resources found',
                   subtitle: 'Be the first to share educational resources',
                   actionText: 'Share Resource',
+                  onAction: _shareResource,
                 )
               : ListView.builder(
                   padding: const EdgeInsets.only(bottom: 16),
@@ -219,6 +222,74 @@ class _CommunityLibraryScreenState
     }
   }
 
+  Future<void> _shareResource() async {
+    try {
+      final result = await fp.FilePicker.platform.pickFiles();
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      if (file.path == null) return;
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Share Resource'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('File: ${file.name}'),
+              const SizedBox(height: 8),
+              TextField(
+                decoration: const InputDecoration(
+                  labelText: 'Title',
+                  hintText: 'Enter resource title',
+                ),
+                controller: TextEditingController(
+                  text: file.name.split('.').first,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                ref.read(resourceStateProvider.notifier).addResource(
+                  title: file.name.split('.').first,
+                  fileName: file.name,
+                  filePath: file.path!,
+                  fileSize: file.size,
+                  fileType: file.extension ?? 'unknown',
+                  uploaderId: 'local',
+                  uploaderName: 'Me',
+                  category: 'General',
+                );
+                Navigator.pop(ctx);
+              },
+              child: const Text('Share'),
+            ),
+          ],
+        ),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _downloadResource(SharedResourceModel resource) async {
+    if (!mounted) return;
+    if (File(resource.filePath).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Opening: ${resource.fileName}')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Resource file not available locally')),
+      );
+    }
+  }
+
   void _showResourceDetails(SharedResourceModel resource) {
     showModalBottomSheet(
       context: context,
@@ -264,7 +335,7 @@ class _CommunityLibraryScreenState
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () {},
+                onPressed: () => _downloadResource(resource),
                 icon: const Icon(Icons.download),
                 label: const Text('Download Resource'),
                 style: ElevatedButton.styleFrom(

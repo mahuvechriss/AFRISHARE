@@ -11,8 +11,8 @@ class QRService {
   final DiscoveryService _discoveryService = DiscoveryService.instance;
 
   /// Generate QR code data for pairing
-  String generatePairingData(String deviceId, String deviceName) {
-    return _discoveryService.generateQRPairingData(deviceId, deviceName);
+  Future<String> generatePairingData(String deviceId, String deviceName) async {
+    return await _discoveryService.generateQRPairingData(deviceId, deviceName);
   }
 
   /// Parse QR code data from scanning
@@ -26,18 +26,29 @@ class QRService {
     double size = 200,
     Color? color,
   }) {
-    return QrImageView(
-      data: data,
-      version: QrVersions.auto,
-      size: size,
-      backgroundColor: Colors.white,
-      eyeStyle: QrEyeStyle(
-        eyeShape: QrEyeShape.square,
-        color: color ?? Colors.green.shade700,
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
       ),
-      dataModuleStyle: QrDataModuleStyle(
-        dataModuleShape: QrDataModuleShape.square,
-        color: color ?? Colors.green.shade700,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: QrImageView(
+          data: data,
+          version: QrVersions.auto,
+          size: size,
+          backgroundColor: Colors.white,
+          eyeStyle: QrEyeStyle(
+            eyeShape: QrEyeShape.square,
+            color: color ?? Colors.black,
+          ),
+          dataModuleStyle: QrDataModuleStyle(
+            dataModuleShape: QrDataModuleShape.square,
+            color: color ?? Colors.black,
+          ),
+        ),
       ),
     );
   }
@@ -47,7 +58,7 @@ class QRService {
     final data = parseQRData(qrData);
     if (data == null) return null;
 
-    // Create device from QR data
+    // Create device from QR data with IP/port for HTTP connection
     final device = DeviceModel(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       name: data['device_name'] as String? ?? 'Unknown Device',
@@ -58,6 +69,8 @@ class QRService {
       isPaired: false,
       isBlocked: false,
       isHidden: false,
+      ipAddress: data['ip'] as String?,
+      port: data['port'] as int?,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -69,7 +82,7 @@ class QRService {
   }
 
   /// Update QR code data (for auto-refresh)
-  String refreshQRData(String deviceId, String deviceName) {
-    return generatePairingData(deviceId, deviceName);
+  Future<String> refreshQRData(String deviceId, String deviceName) async {
+    return await generatePairingData(deviceId, deviceName);
   }
 }

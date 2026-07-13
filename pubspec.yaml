@@ -48,15 +48,21 @@ dependencies:
   flutter_animate: ^4.5.2
   cached_network_image: ^3.4.1
   lottie: ^3.3.1
-  fl_chart: ^0.70.2
   badges: ^3.1.2
   flutter_slidable: ^3.1.1
   image_picker: ^1.1.2
+
+  # WebRTC for Audio/Video Calls
+  flutter_webrtc: ^1.5.0
+
+  # Audio playback for notification sounds
+  audioplayers: ^6.4.0
 
   # Notifications
   flutter_local_notifications: ^18.0.1
 
   # Utilities
+  device_info_plus: ^11.3.0
   intl: ^0.20.2
   uuid: ^4.5.1
   url_launcher: ^6.3.1
@@ -67,6 +73,7 @@ dependencies:
   json_annotation: ^4.9.0
   logger: ^2.5.0
   sqflite_common_ffi_web: ^1.1.1
+  record: ^6.2.1
 
 dev_dependencies:
   flutter_test:
@@ -78,6 +85,7 @@ dev_dependencies:
   riverpod_generator: ^2.6.3
   mockito: ^5.4.6
   mocktail: ^1.0.4
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
@@ -86,3 +94,14 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/animations/
+    - assets/sounds/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  background_color: "#1E5631"
+  adaptive_icon_background: "#1E5631"
+  adaptive_icon_foreground: "assets/icons/app_icon.png"

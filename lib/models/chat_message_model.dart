@@ -31,7 +31,7 @@ class ChatMessageModel {
     required this.createdAt,
   });
 
-  bool get isSentByMe => true; // Will be determined by current user context
+  bool isSentByMe(String currentUserId) => senderId == currentUserId;
 
   Map<String, dynamic> toJson() => {
         'id': id,
